@@ -1,0 +1,19 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <BaseOutputPath>..\bin\</BaseOutputPath>
+    <Platforms>AnyCPU;x64</Platforms>
+    <GenerateDocumentationFile>False</GenerateDocumentationFile>
+    <DocumentationFile>Doc\</DocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Remove="HighResDotNetTimer\**" />
+    <EmbeddedResource Remove="HighResDotNetTimer\**" />
+    <None Remove="HighResDotNetTimer\**" />
+  </ItemGroup>
+
+</Project>
