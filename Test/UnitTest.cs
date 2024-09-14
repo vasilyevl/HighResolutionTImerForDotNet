@@ -21,28 +21,56 @@ OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 namespace HighResTester
 {
     using Grumpy.Utilities.HighResTimer;
+    using System.Diagnostics;
+    using System.Runtime.CompilerServices;
     using System.Runtime.InteropServices;
+
     using Xunit.Abstractions;
     using Xunit.Sdk;
 
+
     public class UnitTest
     {
-        private readonly ITestOutputHelper _testOutputHelper;
-        static TimerCaps _caps = new TimerCaps();
+
+        // Control parameters. 
         uint _period = 3;
         uint _resolution = 1;
+        uint _testDuration = 11334;
 
-        uint _testDuration = 10000;
 
-        DateTime _start = DateTime.Now;
-        List<DateTime> _times = new List<DateTime>();
+        // private fields
+        static TimerCaps _caps = new TimerCaps();
+
+        private readonly ITestOutputHelper _testOutputHelper;
+
+        long _startTicks;
+        long _endTicks;
+
+        List<long> _times = new List<long>();
         List<double> _durations = new List<double>();
+        private readonly double _msInTick;
+
+
+        Stopwatch _stopwatch = new Stopwatch();
 
         public UnitTest(ITestOutputHelper testOutputHelper) {
             _testOutputHelper = testOutputHelper;
+            _msInTick = 1000.0/ Stopwatch.Frequency;
+            _startTicks = 0;
+            _endTicks = 0;
         }
 
- 
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private long StartStopWatch(bool resetEndTime = true) {
+            
+            if (resetEndTime) { _endTicks = long.MinValue; }
+
+            _stopwatch.Reset();
+            _stopwatch.Start();
+            return _stopwatch.ElapsedTicks;
+        }
+
 
 
         [Fact]
@@ -57,12 +85,13 @@ namespace HighResTester
             _testOutputHelper.WriteLine("MM timer caps received: \n" +
                 $"Min - {_caps.PeriodMin}ms, max - {_caps.PeriodMax}ms.");
 
-            _start = DateTime.Now;
- 
             _times.Clear();
 
             uint resolution = Math.Max(_resolution, _caps.PeriodMin);   
             NativeMMTimerWrap.BeginPeriod(resolution);
+
+            _startTicks = StartStopWatch();
+ 
 
             Int32 id = NativeMMTimerWrap.SetEvent(_period, 
                 resolution, TimerCallback, 
@@ -80,6 +109,7 @@ namespace HighResTester
 
         [Fact]
         public void Test2_MMWrap_SingleShot() {
+
             _testOutputHelper.WriteLine("Test2 (\"Single Shot\") started.");
             var r = NativeMMTimerWrap.GetDevCaps(ref _caps,
                  Marshal.SizeOf<TimerCaps>(UnitTest._caps));
@@ -90,28 +120,35 @@ namespace HighResTester
             _testOutputHelper.WriteLine("MM timer caps received: \n" +
                 $"Min - {_caps.PeriodMin}ms, max - {_caps.PeriodMax}ms.");
 
-            for (int i = 0; i < 100; i++) {
+            _durations.Clear();
 
-                _start = DateTime.Now;
+            for (int i = 0; i < 3400; i++) {
 
-                _times.Clear();
+
 
                 uint resolution = Math.Max(_resolution, _caps.PeriodMin);
-                NativeMMTimerWrap.BeginPeriod(resolution);
+
+                //NativeMMTimerWrap.BeginPeriod(resolution);
+
+                _startTicks = StartStopWatch();
+               
                 Int32 id = NativeMMTimerWrap.SetEvent(_period,
-                    resolution, 
-                    TimerCallback,
+                    resolution,
+                    TimerSingleShotCallback,
                     123,
                     (uint)TimerMode.OneShot);
 
                 Assert.True(id != 0, "Failed to set MM timer event.");
-                Thread.Sleep(100);
+                Thread.Sleep( (int) _period*4 );
 
                 NativeMMTimerWrap.KillEvent(id);
-                NativeMMTimerWrap.EndPeriod(resolution);
+               // NativeMMTimerWrap.EndPeriod(resolution);
 
-                ReportResults();
+                _durations.Add((_endTicks - _startTicks)*_msInTick);
+                
             }
+
+            ReportSingleShotResults();
         }
 
         [Fact]
@@ -124,7 +161,7 @@ namespace HighResTester
                 operatingMode: TimerMode.Periodic, 
                 autoStart: false);
 
-            _start = DateTime.Now;
+            _startTicks = StartStopWatch();
             
             timer.Start();
             
@@ -149,8 +186,10 @@ namespace HighResTester
                 operatingMode: TimerMode.Periodic,
                 autoStart: false);
 
-            _start = DateTime.Now;
+
             timer.TimerEvent += EventHandler!;
+
+            _startTicks = StartStopWatch();
             timer.Start();
 
             Thread.Sleep((int)_testDuration);
@@ -179,11 +218,12 @@ namespace HighResTester
             
             timer.TimerEvent += SingleSHutEventHandler!;
             
-            for( int i = 0; i < 50; i++) {
+            for( int i = 0; i < 3400; i++) {
 
-                _start = DateTime.Now;
+                _startTicks = StartStopWatch();
                 timer.Start();
-                Thread.Sleep((int)_period*2); 
+
+                Thread.Sleep(Math.Max((int)_period*2, 25)); 
             }
 
             _testOutputHelper.WriteLine($"MM timer \"Test5\" complete.\n" +
@@ -198,19 +238,23 @@ namespace HighResTester
             _durations.Clear();
             var accum = 0.0;
             var timer = new HighResTimer();
+            _testOutputHelper.WriteLine($" ## \tDuration [ms]." +
+                $"\tError [ms]\tError [%]");
 
-            for (int i = 0; i < 50; i++) {
+            for (int i = 0; i < 3400; i++) {
 
-                _start = DateTime.Now;
+                _startTicks = StartStopWatch();
                 var r = timer.Wait(_period);
-
-                _durations.Add(((double)(DateTime.Now - _start).TotalMicroseconds) / 1000.0);
+                _endTicks = _stopwatch.ElapsedTicks;
+                _durations.Add((_endTicks - _startTicks) * _msInTick);
                 accum += _durations[i];
+
                 Assert.True(r, "Failed to wait for timer.");
 
-                _testOutputHelper.WriteLine($"#{_durations.Count}.\"Test6\" " +
-                    $"Wait lasted {_durations[i].ToString("F2")} ms. Requested time {_period}ms. " +
-                    $"Error: {(100.0 * (_durations[i] - _period) / _period).ToString("F2")}%.");
+                _testOutputHelper.WriteLine($"{_durations.Count}" +
+                    $"\t{_durations[i].ToString("F2")}" +
+                    $"\t{(_durations[i] - _period).ToString("F2")}" +
+                    $"\t{(100.0 * (_durations[i] - _period) / _period).ToString("F2")}%");
             }
 
             _testOutputHelper.WriteLine($"MM timer \"Test6\" complete.\n" +
@@ -220,35 +264,47 @@ namespace HighResTester
                 $"{(accum / _durations.Count).ToString("F2")}ms.");
         }
         private void TimerCallback(int id, int msg, int user, int dw1, int dw2) {
-            _times.Add(DateTime.Now);
+            _times.Add(_stopwatch.ElapsedTicks);
+        }
+
+
+        private void TimerSingleShotCallback(int id, int msg, int user, int dw1, int dw2) {
+            _endTicks = _stopwatch.ElapsedTicks;
         }
 
 
         private void TimerProc(int timerID, ulong clicks, DateTime time) {
 
-            _times.Add(time);
+            _times.Add(_stopwatch.ElapsedTicks);
 
         }
 
         private void EventHandler(object sender, TimerEventArgs e) {
-            _times.Add(e.Time);
+            _times.Add(_stopwatch.ElapsedTicks);
+
         }
 
 
         private void SingleSHutEventHandler(object sender, TimerEventArgs e) {
-           
-            _durations.Add(((double)(DateTime.Now - _start).TotalMicroseconds)/1000.0);
+            _durations.Add((_stopwatch.ElapsedTicks - _startTicks)*_msInTick);
         }
 
         private void ReportResults(){
 
-            _testOutputHelper.WriteLine($"Start Time: {_start.ToString("HH:mm:ss.fff")}");
+            _testOutputHelper.WriteLine($"Start Time: {_startTicks.ToString("HH:mm:ss.fff")}");
             _testOutputHelper.WriteLine($"Period: {_period}ms");
+
+            _testOutputHelper.WriteLine($" ##\tdelta [ms]\tError [ms]\tError [%]");
+
             for (int i = 0; i < _times.Count; i++) {
-                Double delta = (_times[i] - ((i == 0) ? _start : _times[i - 1])).TotalMilliseconds;
+                Double delta = (_times[i] - ((i == 0) ? _startTicks : _times[i - 1])) * _msInTick;
                 var error = delta - _period;
-                _testOutputHelper.WriteLine($" #{i+1}. \tTime: {_times[i].ToString("HH:mm:ss.fff")}, delta: " +
-                    $"{delta.ToString("F2")}ms. Error: {error.ToString("F2")}ms. /  {(100.0 * error / _period).ToString("F2")}%.");
+                
+                string pad= new string(' ', (i<99 ? i < 9 ? 2 : 1 :0 ));
+                _testOutputHelper.WriteLine($"{pad}{i+1}" +
+                    $"\t  {delta.ToString("F2")}" +
+                    $"\t\t{(error < 0.0 ? "" : " ")} {error.ToString("F2")}" +
+                    $"\t\t{(error < 0.0 ? "" : " ")} {(100.0 * error / _period).ToString("F2")}");
             }
         }
 
@@ -257,15 +313,19 @@ namespace HighResTester
 
             _testOutputHelper.WriteLine($"Period: {_period}ms");
             var accum = 0.0;
+
+            _testOutputHelper.WriteLine($"  #\t Delta [ms]");
+
             for (int i = 0; i < _durations.Count; i++) {
 
-                _testOutputHelper.WriteLine($" #{i + 1}. \tTime delta: " +
-                    $"{_durations[i].ToString("F2")}ms."); 
+                _testOutputHelper.WriteLine($"{i + 1}" +
+                    $"\t{_durations[i].ToString("F2")}"); 
             
                 accum += _durations[i];
             }
 
-            _testOutputHelper.WriteLine($"Average duration: {(accum / _durations.Count).ToString("F2")}ms.");
+            _testOutputHelper.WriteLine($"Average duration: " +
+                $"{(accum / _durations.Count).ToString("F2")}ms.");
 
         }
     }

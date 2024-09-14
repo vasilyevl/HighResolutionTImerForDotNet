@@ -109,11 +109,13 @@ namespace Grumpy.Utilities.HighResTimer
         private string _lastError;
         private object _lockCounterLock;
         private ManualResetEvent? _waitHandle;
+
         static HighResTimer() {
 
             NativeMMTimerWrap.GetTimerCaps(out _systemsCaps);
         }
 
+   
 
         public HighResTimer() {
 
@@ -178,7 +180,7 @@ namespace Grumpy.Utilities.HighResTimer
             _userTimerProc = userCallback;
 
             _periodMs = periodMs;
-            _resolutionMs = resolutionMs;
+            _resolutionMs = Math.Max(resolutionMs, _systemsCaps.PeriodMin);
             
             _tickCounter = 0;
             _lockCounter = 0;
@@ -218,10 +220,12 @@ namespace Grumpy.Utilities.HighResTimer
                                (uint)MMTimerMode.OneShot);
 
             _waitHandle = new ManualResetEvent(false);
-            Boolean r = _waitHandle.WaitOne((int)duration * 2);
+            Boolean r = _waitHandle.WaitOne(Math.Max((int)duration * 2, 5));
             _waitHandle.Close();
             _waitHandle = null;
-
+            if (!r) {
+                NativeMMTimerWrap.KillEvent(_timerId);
+            }
             return r;
         }
 
@@ -234,6 +238,10 @@ namespace Grumpy.Utilities.HighResTimer
         /// otherwise, false.</returns>
         public bool Start() {
             try {
+
+                if (_mode == TimerMode.Periodic) {
+                    NativeMMTimerWrap.BeginPeriod(_resolutionMs);
+                }
 
                 _timerId = NativeMMTimerWrap.SetEvent(_periodMs,
                     _resolutionMs,
@@ -272,14 +280,22 @@ namespace Grumpy.Utilities.HighResTimer
             try { 
             
                 var r =  NativeMMTimerWrap.KillEvent(_timerId);
-                
-                if (!(r == 0)) {
-                
+
+                if (r != 0) {            
                     LastError = $"Failed to stop MM timer event in " +
                         $"\"{_mode}\" mode.";
                 }
 
-                return r == 0;
+                uint r2 = 0;
+                if (_mode == TimerMode.Periodic) {
+                    r2 = NativeMMTimerWrap.EndPeriod(_resolutionMs);
+                    if (r2 != 0) {
+                        LastError = $"Failed to end MM timer period in " +
+                       $"\"{_mode}\" mode.";
+                    }
+                }
+
+                return r == 0 && r2 == 0;
             }
             catch (Exception ex) {
                 
